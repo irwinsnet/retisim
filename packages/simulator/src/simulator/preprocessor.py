@@ -7,41 +7,27 @@ import enum
 import pathlib
 import re
 
-import numpy as np
-from numpy import linalg
 import polars as pl
 
 import simulator
 from simulator import model
 
 
-def generate_cholesky_matrx() -> np.array:
-    """Generate a lower Cholesky matrix from a dataset of total returns."""
-    total_returns = np.loadtxt(
-        simulator.data_path / "total-returns.csv",
-        delimiter=",",
-        skiprows=1,
-        usecols=range(1, 15)
-    )
-    covariance_matrix = np.cov(total_returns, rowvar=False)
-    lower_cholesky = linalg.cholesky(covariance_matrix)
-    return lower_cholesky
-
-
-def read_total_returns() -> pl.DataFrame:
-    """Build a dataframe of total returns data."""
+def read_returns_and_rates() -> tuple[pl.DataFrame, pl.DataFrame]:
+    """Build a dataframe of historical returns and rate data."""
+    asset_cols = list(model.asset_classes.keys())
+    rate_cols = list(model.rates.keys())
     schema = {
         "year": pl.Int64,
-        **{col: pl.Float64 for col in model.asset_classes.keys()},
+        **{col: pl.Float64 for col in asset_cols},
         **{col: pl.Float64 for col in model.rates},
-        **{f"{col}_dif": pl.Float64 for col in model.rates}
     }
-    return pl.read_csv(simulator.data_path / "total-returns.csv", schema=schema)
+    data_df = pl.read_csv(simulator.data_path / "total-returns.csv", schema=schema)
+    return (data_df.select("year", *asset_cols), data_df.select("year", *rate_cols))
 
 
 def read_investment_files(
-    folder: pathlib.Path,
-    as_of: datetime.date | None = None
+    folder: pathlib.Path, as_of: datetime.date | None = None
 ) -> list[model.Investment]:
     """Extract investments from all CSV files in a folder and it's subfolders.
 
@@ -71,7 +57,7 @@ def read_vanguard(
     if as_of is None:
         stat = csv_path.stat()
         timestamp = getattr(stat, "st_birthtime", stat.st_mtime)
-        as_of = datetime.date.fromtimestamp(timestamp)
+        as_of = datetime.date.fromtimestamp(timestamp)  # noqa: DTZ012
     investments = []
     with open(csv_path, newline="", encoding="utf-8-sig") as csv_file:
         reader = csv.DictReader(csv_file)
@@ -84,19 +70,20 @@ def read_vanguard(
             # The Price column is rounded to cents, so derive the price from
             # the total value to keep the investment value exact.
             total_value = decimal.Decimal(row["Total Value"])
-            investments.append(model.Investment(
-                account=row["Plan Name"],
-                security=row["Fund Name"],
-                date=as_of,
-                shares=shares,
-                price=(
-                    (total_value / decimal.Decimal(row["Shares"]))
-                    .quantize(
-                        decimal.Decimal("0.00000001"),
-                        rounding=decimal.ROUND_HALF_UP
-                    )
+            investments.append(
+                model.Investment(
+                    account=row["Plan Name"],
+                    security=row["Fund Name"],
+                    date=as_of,
+                    shares=shares,
+                    price=(
+                        (total_value / decimal.Decimal(row["Shares"])).quantize(
+                            decimal.Decimal("0.00000001"),
+                            rounding=decimal.ROUND_HALF_UP,
+                        )
+                    ),
                 )
-            ))
+            )
     return investments
 
 
@@ -119,25 +106,26 @@ def read_tsp(
                 continue
             if as_of is None:
                 end_date = row["Date Range"].split(" - ")[1]
-                date = datetime.datetime.strptime(end_date, "%B %d, %Y").date()
+                date = datetime.date.strptime(end_date, "%B %d, %Y")
             else:
                 date = as_of
             # The Fund Price column is rounded to cents, so derive the price
             # from the closing balance to keep the investment value exact.
             closing_balance = _parse_dollars(row["Closing Balance"])
-            investments.append(model.Investment(
-                account=row["Plan"],
-                security=row["Fund Name"],
-                date=date,
-                shares=shares,
-                price=(
-                    (closing_balance / decimal.Decimal(row["Units"]))
-                    .quantize(
-                     decimal.Decimal("0.00000001"),
-                     rounding=decimal.ROUND_HALF_UP
-                    )
+            investments.append(
+                model.Investment(
+                    account=row["Plan"],
+                    security=row["Fund Name"],
+                    date=date,
+                    shares=shares,
+                    price=(
+                        (closing_balance / decimal.Decimal(row["Units"])).quantize(
+                            decimal.Decimal("0.00000001"),
+                            rounding=decimal.ROUND_HALF_UP,
+                        )
+                    ),
                 )
-            ))
+            )
     return investments
 
 
@@ -166,7 +154,7 @@ def read_schwab(
             raise ValueError(f"Unrecognized Schwab title line: {title!r}")
         account = match.group(1).strip()
         if as_of is None:
-            as_of = datetime.datetime.strptime(match.group(2), "%Y/%m/%d").date()
+            as_of = datetime.date.strptime(match.group(2), "%Y/%m/%d")
         next(csv_file)  # Skip the blank line before the column headers.
         reader = csv.DictReader(csv_file)
         for row in reader:
@@ -177,30 +165,33 @@ def read_schwab(
             if symbol == "Cash & Cash Investments":
                 if market_value == 0:
                     continue
-                investments.append(model.Investment(
-                    account=account,
-                    security="Cash",
-                    date=as_of,
-                    shares=float(market_value),
-                    price=decimal.Decimal("1.00"),
-                ))
+                investments.append(
+                    model.Investment(
+                        account=account,
+                        security="Cash",
+                        date=as_of,
+                        shares=float(market_value),
+                        price=decimal.Decimal("1.00"),
+                    )
+                )
                 continue
             quantity = decimal.Decimal(row["Qty (Quantity)"].replace(",", ""))
             if quantity == 0:
                 continue
-            investments.append(model.Investment(
-                account=account,
-                security=symbol,
-                date=as_of,
-                shares=float(quantity),
-                price=(
-                    (market_value / quantity)
-                    .quantize(
-                        decimal.Decimal("0.00000001"),
-                        rounding=decimal.ROUND_HALF_UP
-                    )
+            investments.append(
+                model.Investment(
+                    account=account,
+                    security=symbol,
+                    date=as_of,
+                    shares=float(quantity),
+                    price=(
+                        (market_value / quantity).quantize(
+                            decimal.Decimal("0.00000001"),
+                            rounding=decimal.ROUND_HALF_UP,
+                        )
+                    ),
                 )
-            ))
+            )
     return investments
 
 
@@ -214,6 +205,7 @@ def _parse_dollars(text: str) -> decimal.Decimal:
 
 class FileType(enum.Enum):
     """Type of CSV file."""
+
     SCHWAB = enum.auto()
     TSP = enum.auto()
     VANGUARD = enum.auto()
@@ -237,7 +229,9 @@ def categorize_file(path: pathlib.Path) -> FileType:
 
 
 def read_investment_file(
-        path: pathlib.Path, as_of: datetime.date | None = None,) -> list[model.Investment]:
+    path: pathlib.Path,
+    as_of: datetime.date | None = None,
+) -> list[model.Investment]:
     """Determine the type then read an investment CSV file."""
     ftype = categorize_file(path)
     match ftype:
@@ -252,9 +246,18 @@ def read_investment_file(
 def read_asset_classes(path: pathlib.Path) -> pl.DataFrame:
     """Generate a dataframe of securities and their asset classes."""
     schema = {
-        col: pl.Float64 for col in [
-            "lcap", "scap", "idev", "iemerg", "hyieldbonds", "ibonds",
-            "tbill", "reit", "gold", "total"
+        col: pl.Float64
+        for col in [
+            "lcap",
+            "scap",
+            "idev",
+            "iemerg",
+            "hyieldbonds",
+            "ibonds",
+            "tbill",
+            "reit",
+            "gold",
+            "total",
         ]
     }
     return pl.read_excel(path, schema_overrides=schema).fill_null(0)

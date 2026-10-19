@@ -1,8 +1,8 @@
 """Core data structures for the retirement simulation."""
+
 import dataclasses
 import datetime
 import decimal
-
 
 asset_classes = {
     "lcap": "Large Cap US Stocks",
@@ -14,7 +14,7 @@ asset_classes = {
     "ibonds": "International Bonds",
     "tbill": "US Treasury Securities",
     "reit": "US Real Estate Investment Trusts",
-    "gold": "Gold"
+    "gold": "Gold",
 }
 
 rates = {
@@ -26,9 +26,10 @@ rates = {
 @dataclasses.dataclass
 class Investment:
     """An individual security held in an investment account."""
+
     account: str
     security: str
-    date: datetime
+    date: datetime.date
     shares: float
     price: decimal.Decimal
 
@@ -36,7 +37,3 @@ class Investment:
     def value(self) -> decimal.Decimal:
         """Shares times price."""
         return round(decimal.Decimal.from_float(self.shares) * self.price, 2)
-
-
-
-    

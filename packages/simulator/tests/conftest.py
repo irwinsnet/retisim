@@ -6,7 +6,6 @@ import tomllib
 
 import pytest
 
-
 TESTS_FOLDER = pathlib.Path(__file__).parent
 DATA_FOLDER = TESTS_FOLDER / "data"
 OUTPUT_FOLDER = TESTS_FOLDER / "output"
