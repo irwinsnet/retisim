@@ -50,7 +50,11 @@ class TestGenerator:
         assert linalg.issymmetric(cov)
 
     def test_random_returns(self) -> None:
-        """Generate random returns"""
+        """Generate random returns.
+        
+        Verifies that randomly generated means and standard deviations for each
+        asset class are within 50% of their expected values. 
+        """
         # Arrange
         gen = simulator.RandomGenerator()
         # Act
